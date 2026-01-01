@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+
+# .NET
+bin/
+obj/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+*.env
+
+# AWS
+.aws-sam/
+cdk.out/
+cdk.context.json
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Docker
+docker-compose*.yml
+Dockerfile*
+
+# Misc
+*.log
+*.tgz
+.cache/
+.temp/
+.tmp/

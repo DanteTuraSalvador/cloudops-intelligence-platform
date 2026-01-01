@@ -1,0 +1,83 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+out/
+.next/
+*.js.map
+*.d.ts.map
+
+# .NET
+bin/
+obj/
+*.dll
+*.pdb
+*.user
+*.suo
+.vs/
+
+# IDE
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+.env.*.local
+*.env
+
+# AWS
+.aws-sam/
+cdk.out/
+cdk.context.json
+
+# Testing
+coverage/
+.nyc_output/
+test-results/
+
+# Docker
+docker-compose.override.yml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Misc
+*.tgz
+.cache/
+.temp/
+.tmp/
+
+# Documentation - exclude all markdown files
+*.md
+
+# Claude Code related
+.claude/
+.clauderc
+CLAUDE.md
+
+# Batch files
+*.bat
+
+# AWS credentials
+rootkey.csv
+*.pem
+credentials
+
+# Azure DevOps setup scripts
+scripts/setup-azure-devops.ps1
+scripts/setup-azure-devops-complete.ps1

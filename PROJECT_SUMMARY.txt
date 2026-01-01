@@ -1,0 +1,39 @@
+# CloudOps Intelligence Platform
+
+## Repository
+https://github.com/DanteTuraSalvador/cloudops-intelligence-platform
+
+## Project Status
+✅ Code pushed to GitHub
+✅ Azure DevOps work items created
+✅ CI/CD pipelines configured
+
+## Quick Links
+- GitHub: https://github.com/DanteTuraSalvador/cloudops-intelligence-platform
+- Azure DevOps: https://dev.azure.com/tengtium-io/CloudOps%20Intelligence%20Platform
+
+## Technologies
+- Frontend: Next.js 15, TypeScript, Tailwind CSS
+- Backend: Node.js, .NET 8, TypeScript
+- Cloud: AWS (Lambda, DynamoDB, API Gateway, S3, CloudFront)
+- CI/CD: GitHub Actions, Azure Pipelines
+- Infrastructure: AWS CDK/Terraform
+
+## Local Development
+```bash
+# Install dependencies
+pnpm install
+
+# Run tests
+pnpm test
+
+# Build all services
+pnpm -r build
+
+# Start development
+pnpm --filter @cloudops/dashboard dev
+```
+
+## Author
+Dante Salvador
+https://github.com/DanteTuraSalvador

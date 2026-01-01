@@ -1,0 +1,223 @@
+services:
+  # ==========================================================================
+  # Infrastructure Services
+  # ==========================================================================
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: cloudops-localstack
+    ports:
+      - "4566:4566"
+      - "4510-4559:4510-4559"
+    environment:
+      - SERVICES=dynamodb,s3,lambda,apigateway,sns,sqs,secretsmanager,cloudwatch,events
+      - DEBUG=1
+      - PERSISTENCE=1
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - "./scripts/localstack:/etc/localstack/init/ready.d"
+      - "localstack-data:/var/lib/localstack"
+    networks:
+      - cloudops-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: cloudops-dynamodb
+    ports:
+      - "8000:8000"
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath /data"
+    volumes:
+      - "dynamodb-data:/data"
+    networks:
+      - cloudops-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: cloudops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - "redis-data:/data"
+    networks:
+      - cloudops-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ==========================================================================
+  # TypeScript Services
+  # ==========================================================================
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: cloudops-api-gateway
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - REDIS_URL=redis://redis:6379
+      - METRICS_TABLE=cloudops-metrics
+      - COSTS_TABLE=cloudops-costs
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cloudops-network
+    restart: unless-stopped
+
+  data-collector:
+    build:
+      context: ./services/data-collector
+      dockerfile: Dockerfile
+    container_name: cloudops-data-collector
+    ports:
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - PORT=3003
+      - USE_MOCK_DATA=true
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - METRICS_TABLE=cloudops-metrics
+      - COSTS_TABLE=cloudops-costs
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+    networks:
+      - cloudops-network
+    restart: unless-stopped
+
+  alert-service:
+    build:
+      context: ./services/alert-service
+      dockerfile: Dockerfile
+    container_name: cloudops-alert-service
+    ports:
+      - "3004:3004"
+    environment:
+      - NODE_ENV=development
+      - PORT=3004
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+    depends_on:
+      localstack:
+        condition: service_healthy
+    networks:
+      - cloudops-network
+    restart: unless-stopped
+
+  # ==========================================================================
+  # .NET Services
+  # ==========================================================================
+
+  cost-analyzer:
+    build:
+      context: ./services/cost-analyzer
+      dockerfile: Dockerfile
+    container_name: cloudops-cost-analyzer
+    ports:
+      - "3002:3002"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:3002
+      - AWS__ServiceURL=http://localstack:4566
+      - AWS__Region=us-east-1
+      - AWS__AccessKey=test
+      - AWS__SecretKey=test
+      - DynamoDB__ServiceURL=http://dynamodb-local:8000
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+    networks:
+      - cloudops-network
+    restart: unless-stopped
+
+  anomaly-detector:
+    build:
+      context: ./services/anomaly-detector
+      dockerfile: Dockerfile
+    container_name: cloudops-anomaly-detector
+    ports:
+      - "3005:3005"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:3005
+      - AWS__ServiceURL=http://localstack:4566
+      - AWS__Region=us-east-1
+      - AWS__AccessKey=test
+      - AWS__SecretKey=test
+      - DynamoDB__ServiceURL=http://dynamodb-local:8000
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+    networks:
+      - cloudops-network
+    restart: unless-stopped
+
+  # ==========================================================================
+  # Frontend
+  # ==========================================================================
+
+  frontend:
+    build:
+      context: ./frontend/dashboard
+      dockerfile: Dockerfile
+    container_name: cloudops-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    depends_on:
+      - api-gateway
+    networks:
+      - cloudops-network
+    restart: unless-stopped
+
+# ==========================================================================
+# Networks & Volumes
+# ==========================================================================
+
+networks:
+  cloudops-network:
+    driver: bridge
+
+volumes:
+  localstack-data:
+  dynamodb-data:
+  redis-data:

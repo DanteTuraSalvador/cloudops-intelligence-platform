@@ -1,0 +1,281 @@
+# Azure Pipelines CI Configuration
+# CloudOps Intelligence Platform
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    exclude:
+      - docs/**
+      - README.md
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+
+variables:
+  nodeVersion: '22.x'
+  dotnetVersion: '8.0.x'
+  pnpmVersion: '8'
+
+stages:
+  - stage: Build
+    displayName: 'Build and Test'
+    jobs:
+      - job: LintAndTypeCheck
+        displayName: 'Lint and Type Check'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Bash@3
+            displayName: 'Install pnpm'
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g pnpm@$(pnpmVersion)
+
+          - task: Cache@2
+            displayName: 'Cache pnpm store'
+            inputs:
+              key: 'pnpm | "$(Agent.OS)" | pnpm-lock.yaml'
+              path: $(PNPM_HOME)/store
+              restoreKeys: |
+                pnpm | "$(Agent.OS)"
+
+          - task: Bash@3
+            displayName: 'Install dependencies'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm install --frozen-lockfile
+
+          - task: Bash@3
+            displayName: 'Run linter'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm lint
+
+          - task: Bash@3
+            displayName: 'Type check'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm typecheck
+
+      - job: TestTypeScript
+        displayName: 'Test TypeScript Services'
+        pool:
+          vmImage: 'ubuntu-latest'
+        services:
+          dynamodb:
+            image: amazon/dynamodb-local
+            ports:
+              - 8000:8000
+        steps:
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Bash@3
+            displayName: 'Install pnpm'
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g pnpm@$(pnpmVersion)
+
+          - task: Bash@3
+            displayName: 'Install dependencies'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm install --frozen-lockfile
+
+          - task: Bash@3
+            displayName: 'Run tests'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm test
+            env:
+              DYNAMODB_ENDPOINT: http://localhost:8000
+              AWS_REGION: us-east-1
+              AWS_ACCESS_KEY_ID: test
+              AWS_SECRET_ACCESS_KEY: test
+              USE_MOCK_DATA: 'true'
+
+          - task: PublishCodeCoverageResults@1
+            displayName: 'Publish code coverage'
+            condition: always()
+            inputs:
+              codeCoverageTool: 'Cobertura'
+              summaryFileLocation: '$(System.DefaultWorkingDirectory)/coverage/cobertura-coverage.xml'
+              reportDirectory: '$(System.DefaultWorkingDirectory)/coverage'
+
+      - job: TestCSharp
+        displayName: 'Test C# Services'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: UseDotNet@2
+            displayName: 'Setup .NET'
+            inputs:
+              version: $(dotnetVersion)
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore dependencies - Cost Analyzer'
+            inputs:
+              command: 'restore'
+              projects: 'services/cost-analyzer/CostAnalyzer.csproj'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Restore dependencies - Anomaly Detector'
+            inputs:
+              command: 'restore'
+              projects: 'services/anomaly-detector/AnomalyDetector.csproj'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build - Cost Analyzer'
+            inputs:
+              command: 'build'
+              projects: 'services/cost-analyzer/CostAnalyzer.csproj'
+              arguments: '--no-restore'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Build - Anomaly Detector'
+            inputs:
+              command: 'build'
+              projects: 'services/anomaly-detector/AnomalyDetector.csproj'
+              arguments: '--no-restore'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Test - Cost Analyzer'
+            inputs:
+              command: 'test'
+              projects: 'services/cost-analyzer/CostAnalyzer.csproj'
+              arguments: '--no-build --verbosity normal'
+
+          - task: DotNetCoreCLI@2
+            displayName: 'Test - Anomaly Detector'
+            inputs:
+              command: 'test'
+              projects: 'services/anomaly-detector/AnomalyDetector.csproj'
+              arguments: '--no-build --verbosity normal'
+
+      - job: BuildFrontend
+        displayName: 'Build Frontend'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Bash@3
+            displayName: 'Install pnpm'
+            inputs:
+              targetType: 'inline'
+              script: |
+                npm install -g pnpm@$(pnpmVersion)
+
+          - task: Bash@3
+            displayName: 'Install dependencies'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm install --frozen-lockfile
+
+          - task: Bash@3
+            displayName: 'Build frontend'
+            inputs:
+              targetType: 'inline'
+              script: |
+                pnpm --filter @cloudops/dashboard build
+            env:
+              NEXT_PUBLIC_API_URL: http://localhost:3001
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish frontend build artifacts'
+            inputs:
+              PathtoPublish: 'frontend/dashboard/.next'
+              ArtifactName: 'frontend-build'
+              publishLocation: 'Container'
+
+  - stage: DockerBuild
+    displayName: 'Docker Build'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: BuildDockerImages
+        displayName: 'Build Docker Images'
+        pool:
+          vmImage: 'ubuntu-latest'
+        strategy:
+          matrix:
+            api-gateway:
+              serviceName: 'api-gateway'
+            data-collector:
+              serviceName: 'data-collector'
+            alert-service:
+              serviceName: 'alert-service'
+            cost-analyzer:
+              serviceName: 'cost-analyzer'
+            anomaly-detector:
+              serviceName: 'anomaly-detector'
+        steps:
+          - task: Docker@2
+            displayName: 'Build Docker image'
+            inputs:
+              command: 'build'
+              Dockerfile: 'services/$(serviceName)/Dockerfile'
+              buildContext: 'services/$(serviceName)'
+              tags: |
+                cloudops-$(serviceName):$(Build.BuildId)
+                cloudops-$(serviceName):latest
+
+  - stage: SecurityScan
+    displayName: 'Security Scan'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+      - job: TrivyScan
+        displayName: 'Trivy Security Scan'
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - task: Bash@3
+            displayName: 'Install Trivy'
+            inputs:
+              targetType: 'inline'
+              script: |
+                sudo apt-get install wget apt-transport-https gnupg lsb-release
+                wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+                echo "deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
+                sudo apt-get update
+                sudo apt-get install trivy
+
+          - task: Bash@3
+            displayName: 'Run Trivy scan'
+            inputs:
+              targetType: 'inline'
+              script: |
+                trivy fs --format sarif --output trivy-results.sarif .
+
+          - task: PublishBuildArtifacts@1
+            displayName: 'Publish security scan results'
+            condition: always()
+            inputs:
+              PathtoPublish: 'trivy-results.sarif'
+              ArtifactName: 'security-scan'
+              publishLocation: 'Container'

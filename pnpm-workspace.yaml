@@ -1,0 +1,7 @@
+packages:
+  - "packages/*"
+  - "services/api-gateway"
+  - "services/data-collector"
+  - "services/alert-service"
+  - "frontend/dashboard"
+  - "infrastructure/cdk"

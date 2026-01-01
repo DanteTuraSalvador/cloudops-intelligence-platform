@@ -1,0 +1,231 @@
+# Manual Deployment Steps - CloudOps Platform
+
+The automated script had some issues with Lambda functions not existing yet.
+Let's deploy manually with these simple steps.
+
+## Step 1: Create Lambda Functions (5 minutes)
+
+### Deploy API Gateway Lambda
+
+```powershell
+cd "C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform\services\api-gateway"
+
+# Build
+pnpm install --prod
+pnpm build
+
+# Package
+Compress-Archive -Path dist,node_modules,package.json -DestinationPath function.zip -Force
+
+# Create Lambda
+aws lambda create-function `
+  --function-name cloudops-api-gateway `
+  --runtime nodejs22.x `
+  --handler dist/server.handler `
+  --zip-file fileb://function.zip `
+  --role arn:aws:iam::695210052357:role/cloudops-lambda-role `
+  --timeout 30 `
+  --memory-size 512 `
+  --region ap-southeast-2 `
+  --environment "Variables={AWS_REGION=ap-southeast-2,METRICS_TABLE=cloudops-metrics,COSTS_TABLE=cloudops-costs}"
+```
+
+### Deploy Data Collector Lambda
+
+```powershell
+cd "C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform\services\data-collector"
+
+# Build
+pnpm install --prod
+pnpm build
+
+# Package
+Compress-Archive -Path dist,node_modules,package.json -DestinationPath function.zip -Force
+
+# Create Lambda
+aws lambda create-function `
+  --function-name cloudops-data-collector `
+  --runtime nodejs22.x `
+  --handler dist/handlers/collect-metrics.handler `
+  --zip-file fileb://function.zip `
+  --role arn:aws:iam::695210052357:role/cloudops-lambda-role `
+  --timeout 60 `
+  --memory-size 512 `
+  --region ap-southeast-2 `
+  --environment "Variables={AWS_REGION=ap-southeast-2,METRICS_TABLE=cloudops-metrics,COSTS_TABLE=cloudops-costs}"
+```
+
+### Deploy Alert Service Lambda
+
+```powershell
+cd "C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform\services\alert-service"
+
+# Build
+pnpm install --prod
+pnpm build
+
+# Package
+Compress-Archive -Path dist,node_modules,package.json -DestinationPath function.zip -Force
+
+# Create Lambda
+aws lambda create-function `
+  --function-name cloudops-alert-service `
+  --runtime nodejs22.x `
+  --handler dist/handlers/send-alert.handler `
+  --zip-file fileb://function.zip `
+  --role arn:aws:iam::695210052357:role/cloudops-lambda-role `
+  --timeout 30 `
+  --memory-size 256 `
+  --region ap-southeast-2 `
+  --environment "Variables={AWS_REGION=ap-southeast-2}"
+```
+
+## Step 2: Create API Gateway (2 minutes)
+
+```powershell
+# Create HTTP API
+aws apigatewayv2 create-api `
+  --name cloudops-api `
+  --protocol-type HTTP `
+  --region ap-southeast-2
+
+# Note the ApiId from the output, then use it below
+# Example: abc123xyz
+
+$API_ID = "YOUR_API_ID_HERE"  # Replace with actual ID from above
+
+# Create integration with Lambda
+aws apigatewayv2 create-integration `
+  --api-id $API_ID `
+  --integration-type AWS_PROXY `
+  --integration-uri arn:aws:lambda:ap-southeast-2:695210052357:function:cloudops-api-gateway `
+  --payload-format-version 2.0 `
+  --region ap-southeast-2
+
+# Note the IntegrationId from output
+$INTEGRATION_ID = "YOUR_INTEGRATION_ID"  # Replace with actual ID
+
+# Create routes
+aws apigatewayv2 create-route `
+  --api-id $API_ID `
+  --route-key "GET /api/metrics" `
+  --target "integrations/$INTEGRATION_ID" `
+  --region ap-southeast-2
+
+aws apigatewayv2 create-route `
+  --api-id $API_ID `
+  --route-key "GET /api/costs" `
+  --target "integrations/$INTEGRATION_ID" `
+  --region ap-southeast-2
+
+aws apigatewayv2 create-route `
+  --api-id $API_ID `
+  --route-key "GET /api/health" `
+  --target "integrations/$INTEGRATION_ID" `
+  --region ap-southeast-2
+
+# Create stage
+aws apigatewayv2 create-stage `
+  --api-id $API_ID `
+  --stage-name '$default' `
+  --auto-deploy `
+  --region ap-southeast-2
+
+# Grant API Gateway permission to invoke Lambda
+aws lambda add-permission `
+  --function-name cloudops-api-gateway `
+  --statement-id apigateway-invoke `
+  --action lambda:InvokeFunction `
+  --principal apigatewayv2.amazonaws.com `
+  --source-arn "arn:aws:execute-api:ap-southeast-2:695210052357:$API_ID/*/*" `
+  --region ap-southeast-2
+```
+
+Your API URL will be: `https://$API_ID.execute-api.ap-southeast-2.amazonaws.com`
+
+## Step 3: Set Up EventBridge (Already Done!)
+
+The EventBridge rules were created successfully:
+✅ cloudops-collect-metrics (every 5 minutes)
+✅ cloudops-collect-costs (daily)
+
+Just need to grant permissions:
+
+```powershell
+# For metrics collection
+aws lambda add-permission `
+  --function-name cloudops-data-collector `
+  --statement-id eventbridge-invoke-metrics `
+  --action lambda:InvokeFunction `
+  --principal events.amazonaws.com `
+  --source-arn "arn:aws:events:ap-southeast-2:695210052357:rule/cloudops-collect-metrics" `
+  --region ap-southeast-2
+
+# For cost collection
+aws lambda add-permission `
+  --function-name cloudops-data-collector `
+  --statement-id eventbridge-invoke-costs `
+  --action lambda:InvokeFunction `
+  --principal events.amazonaws.com `
+  --source-arn "arn:aws:events:ap-southeast-2:695210052357:rule/cloudops-collect-costs" `
+  --region ap-southeast-2
+```
+
+## Step 4: Test Everything
+
+```powershell
+# Test API
+curl https://YOUR_API_ID.execute-api.ap-southeast-2.amazonaws.com/api/health
+
+# Should return:
+# {"status":"ok","timestamp":"..."}
+
+# Manually invoke data collector
+aws lambda invoke `
+  --function-name cloudops-data-collector `
+  --region ap-southeast-2 `
+  response.json
+
+# Check the response
+cat response.json
+
+# Check DynamoDB for data
+aws dynamodb scan --table-name cloudops-metrics --limit 5 --region ap-southeast-2
+```
+
+## Step 5: Update Frontend
+
+Create `frontend/dashboard/.env.local`:
+```
+NEXT_PUBLIC_API_URL=https://YOUR_API_ID.execute-api.ap-southeast-2.amazonaws.com
+```
+
+Then run:
+```powershell
+cd frontend\dashboard
+pnpm install
+pnpm dev
+```
+
+Open: http://localhost:3000
+
+---
+
+##  Quick Status Check
+
+Run these to see what exists:
+
+```powershell
+# List Lambda functions
+aws lambda list-functions --region ap-southeast-2 --query "Functions[?contains(FunctionName, 'cloudops')].FunctionName"
+
+# List API Gateways
+aws apigatewayv2 get-apis --region ap-southeast-2 --query "Items[?Name=='cloudops-api'].{Name:Name,ApiId:ApiId}"
+
+# List EventBridge rules
+aws events list-rules --region ap-southeast-2 --query "Rules[?contains(Name, 'cloudops')].Name"
+```
+
+---
+
+Ready to deploy? Start with Step 1!

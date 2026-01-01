@@ -1,0 +1,438 @@
+# Azure Pipelines CD Configuration
+# CloudOps Intelligence Platform - Continuous Deployment
+
+trigger: none # Only run on manual trigger or after CI pipeline
+
+pr: none
+
+variables:
+  nodeVersion: '22.x'
+  pnpmVersion: '8'
+  awsRegion: 'ap-southeast-2'
+
+stages:
+  - stage: DeployDev
+    displayName: 'Deploy to Development'
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/develop'))
+    jobs:
+      - deployment: DeployServices
+        displayName: 'Deploy Services to Dev'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloudops-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  displayName: 'Setup Node.js'
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - task: Bash@3
+                  displayName: 'Install pnpm'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      npm install -g pnpm@$(pnpmVersion)
+
+                - task: Bash@3
+                  displayName: 'Install dependencies'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm install --frozen-lockfile
+
+                - task: Bash@3
+                  displayName: 'Build all services'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm -r build
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy API Gateway to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Dev'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/api-gateway
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-api-gateway-dev \
+                        --zip-file fileb://function.zip
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy Data Collector to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Dev'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/data-collector
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-data-collector-dev \
+                        --zip-file fileb://function.zip
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy Alert Service to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Dev'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/alert-service
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-alert-service-dev \
+                        --zip-file fileb://function.zip
+
+      - deployment: DeployFrontend
+        displayName: 'Deploy Frontend to Dev'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloudops-dev'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  displayName: 'Setup Node.js'
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - task: Bash@3
+                  displayName: 'Install pnpm'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      npm install -g pnpm@$(pnpmVersion)
+
+                - task: Bash@3
+                  displayName: 'Install dependencies'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm install --frozen-lockfile
+
+                - task: Bash@3
+                  displayName: 'Build frontend'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm --filter @cloudops/dashboard build
+                  env:
+                    NEXT_PUBLIC_API_URL: https://api-dev.cloudops.example.com
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy to S3 and invalidate CloudFront'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Dev'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd frontend/dashboard
+                      aws s3 sync .next/static s3://cloudops-frontend-dev/_next/static --delete
+                      aws s3 sync public s3://cloudops-frontend-dev/public --delete
+                      aws cloudfront create-invalidation \
+                        --distribution-id $(CloudFrontDistributionIdDev) \
+                        --paths "/*"
+
+  - stage: DeployStaging
+    displayName: 'Deploy to Staging'
+    dependsOn: DeployDev
+    condition: succeeded()
+    jobs:
+      - deployment: DeployServices
+        displayName: 'Deploy Services to Staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloudops-staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  displayName: 'Setup Node.js'
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - task: Bash@3
+                  displayName: 'Install pnpm'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      npm install -g pnpm@$(pnpmVersion)
+
+                - task: Bash@3
+                  displayName: 'Install dependencies'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm install --frozen-lockfile
+
+                - task: Bash@3
+                  displayName: 'Build all services'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm -r build
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy API Gateway to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Staging'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/api-gateway
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-api-gateway-staging \
+                        --zip-file fileb://function.zip
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy Data Collector to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Staging'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/data-collector
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-data-collector-staging \
+                        --zip-file fileb://function.zip
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy Alert Service to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Staging'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/alert-service
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-alert-service-staging \
+                        --zip-file fileb://function.zip
+
+      - deployment: DeployFrontend
+        displayName: 'Deploy Frontend to Staging'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloudops-staging'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  displayName: 'Setup Node.js'
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - task: Bash@3
+                  displayName: 'Install pnpm'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      npm install -g pnpm@$(pnpmVersion)
+
+                - task: Bash@3
+                  displayName: 'Install dependencies'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm install --frozen-lockfile
+
+                - task: Bash@3
+                  displayName: 'Build frontend'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm --filter @cloudops/dashboard build
+                  env:
+                    NEXT_PUBLIC_API_URL: https://api-staging.cloudops.example.com
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy to S3 and invalidate CloudFront'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Staging'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd frontend/dashboard
+                      aws s3 sync .next/static s3://cloudops-frontend-staging/_next/static --delete
+                      aws s3 sync public s3://cloudops-frontend-staging/public --delete
+                      aws cloudfront create-invalidation \
+                        --distribution-id $(CloudFrontDistributionIdStaging) \
+                        --paths "/*"
+
+  - stage: DeployProduction
+    displayName: 'Deploy to Production'
+    dependsOn: DeployStaging
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    jobs:
+      - deployment: DeployServices
+        displayName: 'Deploy Services to Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloudops-production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  displayName: 'Setup Node.js'
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - task: Bash@3
+                  displayName: 'Install pnpm'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      npm install -g pnpm@$(pnpmVersion)
+
+                - task: Bash@3
+                  displayName: 'Install dependencies'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm install --frozen-lockfile
+
+                - task: Bash@3
+                  displayName: 'Build all services'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm -r build
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy API Gateway to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Production'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/api-gateway
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-api-gateway-prod \
+                        --zip-file fileb://function.zip
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy Data Collector to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Production'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/data-collector
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-data-collector-prod \
+                        --zip-file fileb://function.zip
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy Alert Service to Lambda'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Production'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd services/alert-service
+                      zip -r function.zip dist node_modules package.json
+                      aws lambda update-function-code \
+                        --function-name cloudops-alert-service-prod \
+                        --zip-file fileb://function.zip
+
+      - deployment: DeployFrontend
+        displayName: 'Deploy Frontend to Production'
+        pool:
+          vmImage: 'ubuntu-latest'
+        environment: 'cloudops-production'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - task: NodeTool@0
+                  displayName: 'Setup Node.js'
+                  inputs:
+                    versionSpec: $(nodeVersion)
+
+                - task: Bash@3
+                  displayName: 'Install pnpm'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      npm install -g pnpm@$(pnpmVersion)
+
+                - task: Bash@3
+                  displayName: 'Install dependencies'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm install --frozen-lockfile
+
+                - task: Bash@3
+                  displayName: 'Build frontend'
+                  inputs:
+                    targetType: 'inline'
+                    script: |
+                      pnpm --filter @cloudops/dashboard build
+                  env:
+                    NEXT_PUBLIC_API_URL: https://api.cloudops.example.com
+
+                - task: AWSShellScript@1
+                  displayName: 'Deploy to S3 and invalidate CloudFront'
+                  inputs:
+                    awsCredentials: 'AWS-CloudOps-Production'
+                    regionName: $(awsRegion)
+                    scriptType: 'inline'
+                    inlineScript: |
+                      cd frontend/dashboard
+                      aws s3 sync .next/static s3://cloudops-frontend-prod/_next/static --delete
+                      aws s3 sync public s3://cloudops-frontend-prod/public --delete
+                      aws cloudfront create-invalidation \
+                        --distribution-id $(CloudFrontDistributionIdProd) \
+                        --paths "/*"
+
+      - job: RunSmokeTests
+        displayName: 'Run Smoke Tests'
+        dependsOn:
+          - DeployServices
+          - DeployFrontend
+        pool:
+          vmImage: 'ubuntu-latest'
+        steps:
+          - checkout: self
+
+          - task: NodeTool@0
+            displayName: 'Setup Node.js'
+            inputs:
+              versionSpec: $(nodeVersion)
+
+          - task: Bash@3
+            displayName: 'Run smoke tests'
+            inputs:
+              targetType: 'inline'
+              script: |
+                # Add smoke test commands here
+                curl -f https://api.cloudops.example.com/health || exit 1
+                curl -f https://cloudops.example.com || exit 1
+                echo "Smoke tests passed"

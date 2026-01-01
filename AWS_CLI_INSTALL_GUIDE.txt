@@ -1,0 +1,114 @@
+# AWS CLI Installation Guide
+
+## Quick Installation (5 minutes)
+
+I've already downloaded the AWS CLI installer for you!
+
+### Step 1: Run the Installer
+
+1. Open File Explorer
+2. Navigate to: `C:\Users\Dante Salvador\Downloads`
+3. Double-click `AWSCLIV2.msi`
+4. Click "Next" through the installation wizard
+5. Accept the license agreement
+6. Click "Install" (may need admin privileges)
+7. Click "Finish" when done
+
+### Step 2: Verify Installation
+
+Open a NEW PowerShell window and run:
+```powershell
+aws --version
+```
+
+You should see something like:
+```
+aws-cli/2.x.x Python/3.x.x Windows/10 exe/AMD64
+```
+
+### Step 3: Configure AWS Credentials
+
+You already have credentials in `rootkey.csv`. Let's configure them:
+
+```powershell
+aws configure
+```
+
+When prompted, enter:
+```
+AWS Access Key ID: [from rootkey.csv - column 1]
+AWS Secret Access Key: [from rootkey.csv - column 2]
+Default region name: ap-southeast-2
+Default output format: json
+```
+
+### Step 4: Test AWS CLI
+
+```powershell
+aws sts get-caller-identity
+```
+
+You should see your AWS account information.
+
+---
+
+## Alternative: Manual Download (if installer didn't work)
+
+If you need to download it again:
+
+1. Go to: https://awscli.amazonaws.com/AWSCLIV2.msi
+2. Download the installer
+3. Run the MSI file
+4. Follow the installation wizard
+
+---
+
+## Troubleshooting
+
+### "aws is not recognized"
+
+**Solution**: Close and reopen PowerShell after installation
+- The PATH is updated during installation
+- Existing PowerShell windows won't see the new PATH
+
+### Need Admin Privileges
+
+**Solution**: Right-click AWSCLIV2.msi → "Run as administrator"
+
+### Already Installed
+
+**Solution**: Just configure your credentials:
+```powershell
+aws configure
+```
+
+---
+
+## After AWS CLI is Installed
+
+Once `aws --version` works, you're ready to deploy!
+
+Run:
+```powershell
+cd "C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform"
+.\deployment\deploy.ps1
+```
+
+This will deploy your entire platform to AWS in 3-5 minutes!
+
+---
+
+## Quick Reference
+
+### Your AWS Credentials Location
+`C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform\rootkey.csv`
+
+### Your Deployment Script
+`C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform\deployment\deploy.ps1`
+
+### AWS Region
+`ap-southeast-2` (Sydney)
+
+---
+
+Ready? Let's get AWS CLI installed and deploy your platform! 🚀

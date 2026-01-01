@@ -1,0 +1,134 @@
+# Integration testing configuration
+# Usage: docker compose -f docker-compose.test.yml up --abort-on-container-exit
+
+services:
+  # ==========================================================================
+  # Infrastructure for Testing
+  # ==========================================================================
+
+  localstack:
+    image: localstack/localstack:latest
+    container_name: cloudops-test-localstack
+    environment:
+      - SERVICES=dynamodb,s3,lambda,apigateway,sns,sqs,secretsmanager,cloudwatch,events
+      - DEBUG=0
+      - PERSISTENCE=0
+      - AWS_DEFAULT_REGION=us-east-1
+    volumes:
+      - "./scripts/localstack:/etc/localstack/init/ready.d"
+    networks:
+      - cloudops-test-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dynamodb-local:
+    image: amazon/dynamodb-local:latest
+    container_name: cloudops-test-dynamodb
+    command: "-jar DynamoDBLocal.jar -sharedDb -inMemory"
+    networks:
+      - cloudops-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000 || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cloudops-test-redis
+    networks:
+      - cloudops-test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  # ==========================================================================
+  # Test Runner
+  # ==========================================================================
+
+  integration-tests:
+    build:
+      context: .
+      dockerfile: tests/integration/Dockerfile
+    container_name: cloudops-integration-tests
+    environment:
+      - NODE_ENV=test
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - REDIS_URL=redis://redis:6379
+      - API_GATEWAY_URL=http://api-gateway:3001
+      - COST_ANALYZER_URL=http://cost-analyzer:3002
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - cloudops-test-network
+    volumes:
+      - ./tests:/tests:ro
+      - test-results:/results
+
+  # ==========================================================================
+  # Services Under Test
+  # ==========================================================================
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile
+    container_name: cloudops-test-api-gateway
+    environment:
+      - NODE_ENV=test
+      - PORT=3001
+      - AWS_ENDPOINT=http://localstack:4566
+      - AWS_REGION=us-east-1
+      - AWS_ACCESS_KEY_ID=test
+      - AWS_SECRET_ACCESS_KEY=test
+      - DYNAMODB_ENDPOINT=http://dynamodb-local:8000
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+    networks:
+      - cloudops-test-network
+
+  cost-analyzer:
+    build:
+      context: ./services/cost-analyzer
+      dockerfile: Dockerfile
+    container_name: cloudops-test-cost-analyzer
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Test
+      - ASPNETCORE_URLS=http://+:3002
+      - AWS__ServiceURL=http://localstack:4566
+      - AWS__Region=us-east-1
+      - AWS__AccessKey=test
+      - AWS__SecretKey=test
+      - DynamoDB__ServiceURL=http://dynamodb-local:8000
+    depends_on:
+      localstack:
+        condition: service_healthy
+      dynamodb-local:
+        condition: service_healthy
+    networks:
+      - cloudops-test-network
+
+networks:
+  cloudops-test-network:
+    driver: bridge
+
+volumes:
+  test-results:

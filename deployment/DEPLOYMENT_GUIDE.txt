@@ -1,0 +1,363 @@
+# CloudOps Intelligence Platform - Deployment Guide
+
+## Quick Start (5 minutes)
+
+### Prerequisites ✅
+- AWS Account with Free Tier active
+- AWS CLI configured (`aws configure`)
+- Node.js 22+ installed
+- pnpm installed (`npm install -g pnpm`)
+
+### Step 1: Deploy Backend (2-3 minutes)
+
+Open PowerShell or Command Prompt:
+
+```cmd
+cd "C:\Users\Dante Salvador\Downloads\CloudOps Intelligence Platform"
+
+# Run the deployment script
+.\deployment\deploy.bat
+```
+
+This will:
+- ✅ Create IAM roles
+- ✅ Deploy 3 Lambda functions
+- ✅ Set up API Gateway
+- ✅ Configure EventBridge schedules
+
+You'll get an API endpoint like:
+`https://abc123xyz.execute-api.ap-southeast-2.amazonaws.com`
+
+### Step 2: Set Up Billing Alerts (1 minute)
+
+```cmd
+.\deployment\setup-billing-alerts.bat
+```
+
+Enter your email when prompted, then:
+- ✅ Check your email
+- ✅ Click "Confirm subscription"
+
+You'll get alerts at $1, $5, $10, and $20
+
+### Step 3: Test the Deployment (1 minute)
+
+Test your API:
+```cmd
+curl https://YOUR_API_ID.execute-api.ap-southeast-2.amazonaws.com/api/health
+```
+
+Should return:
+```json
+{"status":"ok","timestamp":"..."}
+```
+
+### Step 4: Update Frontend Config
+
+Edit `frontend/dashboard/.env.local`:
+```env
+NEXT_PUBLIC_API_URL=https://YOUR_API_ID.execute-api.ap-southeast-2.amazonaws.com
+```
+
+Run frontend locally:
+```cmd
+cd frontend\dashboard
+pnpm install
+pnpm dev
+```
+
+Open: http://localhost:3000
+
+---
+
+## Deployment Steps Explained
+
+### What Gets Deployed
+
+1. **IAM Role** (`cloudops-lambda-role`)
+   - Permissions for Lambda to access DynamoDB, CloudWatch, Cost Explorer
+   - Follows least privilege principle
+
+2. **Lambda Functions** (3 total)
+   - `cloudops-api-gateway`: Handles API requests from frontend
+   - `cloudops-data-collector`: Collects metrics every 5 minutes
+   - `cloudops-alert-service`: Sends alerts (not active yet)
+
+3. **API Gateway** (`cloudops-api`)
+   - HTTP API (cheaper than REST API)
+   - Routes: /api/metrics, /api/costs, /api/health
+   - CORS enabled for frontend
+
+4. **EventBridge Rules** (2 total)
+   - `cloudops-collect-metrics`: Triggers every 5 minutes
+   - `cloudops-collect-costs`: Triggers daily at midnight UTC
+
+5. **CloudWatch Log Groups**
+   - 7-day retention (free tier friendly)
+   - Automatic cleanup to avoid costs
+
+---
+
+## Cost Breakdown
+
+### Free Tier Usage:
+```
+Lambda invocations:    13,680/month  (1.4% of 1M free tier)
+API Gateway requests:   5,000/month  (0.5% of 1M free tier)
+DynamoDB storage:       0.1 GB       (0.4% of 25 GB free tier)
+CloudWatch logs:        0.1 GB       (2% of 5 GB free tier)
+EventBridge events:     9,000/month  (0.2% of 5M free tier)
+```
+
+**Total Cost: $0.00** ✅
+
+---
+
+## Troubleshooting
+
+### Issue: "AccessDeniedException"
+**Solution**: Your IAM role needs more permissions
+```cmd
+# Check if role exists
+aws iam get-role --role-name cloudops-lambda-role
+
+# Reattach policies
+aws iam attach-role-policy --role-name cloudops-lambda-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+```
+
+### Issue: "Function not found"
+**Solution**: Lambda didn't deploy correctly
+```cmd
+# List functions
+aws lambda list-functions --region ap-southeast-2
+
+# Redeploy
+cd services\api-gateway
+pnpm build
+# ... follow manual deployment steps
+```
+
+### Issue: API returns 403 or 404
+**Solution**: API Gateway not configured correctly
+```cmd
+# Check API exists
+aws apigatewayv2 get-apis --region ap-southeast-2
+
+# Check routes
+aws apigatewayv2 get-routes --api-id YOUR_API_ID --region ap-southeast-2
+```
+
+### Issue: No data in DynamoDB
+**Solution**: EventBridge isn't triggering Lambda
+```cmd
+# Check rules
+aws events list-rules --region ap-southeast-2
+
+# Manually invoke Lambda to test
+aws lambda invoke --function-name cloudops-data-collector --region ap-southeast-2 response.json
+
+# Check response
+type response.json
+```
+
+### Issue: Billing alert not received
+**Solution**: Subscription not confirmed
+```cmd
+# Check subscription status
+aws sns list-subscriptions --region us-east-1
+
+# Look for "PendingConfirmation" - check email
+```
+
+---
+
+## Verifying Deployment
+
+### Check 1: Lambda Functions Exist
+```cmd
+aws lambda list-functions --region ap-southeast-2 --query "Functions[?contains(FunctionName, 'cloudops')].FunctionName"
+```
+
+Expected output:
+```
+cloudops-api-gateway
+cloudops-data-collector
+cloudops-alert-service
+```
+
+### Check 2: API Gateway Responds
+```cmd
+curl https://YOUR_API_ID.execute-api.ap-southeast-2.amazonaws.com/api/health
+```
+
+Expected: `{"status":"ok"}`
+
+### Check 3: EventBridge Schedules Active
+```cmd
+aws events list-rules --region ap-southeast-2 --query "Rules[?contains(Name, 'cloudops')].Name"
+```
+
+Expected:
+```
+cloudops-collect-metrics
+cloudops-collect-costs
+```
+
+### Check 4: Data Collection Working
+```cmd
+# Wait 5 minutes, then check DynamoDB
+aws dynamodb scan --table-name cloudops-metrics --limit 5 --region ap-southeast-2
+```
+
+Should see metrics data
+
+### Check 5: CloudWatch Logs Present
+```cmd
+aws logs describe-log-groups --region ap-southeast-2 --log-group-name-prefix "/aws/lambda/cloudops"
+```
+
+Should see log groups for each Lambda
+
+---
+
+## Manual Deployment (If Script Fails)
+
+### Deploy Lambda Manually
+
+```cmd
+cd services\api-gateway
+
+# Install and build
+pnpm install --prod
+pnpm build
+
+# Create zip
+powershell -Command "Compress-Archive -Path dist, node_modules, package.json -DestinationPath function.zip -Force"
+
+# Create function
+aws lambda create-function ^
+  --function-name cloudops-api-gateway ^
+  --runtime nodejs22.x ^
+  --handler dist/server.handler ^
+  --zip-file fileb://function.zip ^
+  --role arn:aws:iam::YOUR_ACCOUNT_ID:role/cloudops-lambda-role ^
+  --timeout 30 ^
+  --memory-size 512 ^
+  --region ap-southeast-2 ^
+  --environment Variables="{AWS_REGION=ap-southeast-2,METRICS_TABLE=cloudops-metrics,COSTS_TABLE=cloudops-costs}"
+```
+
+Repeat for other Lambda functions.
+
+### Create API Gateway Manually
+
+```cmd
+# Create API
+aws apigatewayv2 create-api ^
+  --name cloudops-api ^
+  --protocol-type HTTP ^
+  --cors-configuration AllowOrigins='*',AllowMethods='GET,POST,OPTIONS' ^
+  --region ap-southeast-2
+
+# Get API ID from output, then create integration
+aws apigatewayv2 create-integration ^
+  --api-id YOUR_API_ID ^
+  --integration-type AWS_PROXY ^
+  --integration-uri arn:aws:lambda:ap-southeast-2:YOUR_ACCOUNT_ID:function:cloudops-api-gateway ^
+  --payload-format-version 2.0 ^
+  --region ap-southeast-2
+
+# Create routes (use integration ID from above)
+aws apigatewayv2 create-route ^
+  --api-id YOUR_API_ID ^
+  --route-key "GET /api/metrics" ^
+  --target "integrations/YOUR_INTEGRATION_ID" ^
+  --region ap-southeast-2
+
+# Create stage
+aws apigatewayv2 create-stage ^
+  --api-id YOUR_API_ID ^
+  --stage-name $default ^
+  --auto-deploy ^
+  --region ap-southeast-2
+```
+
+---
+
+## Cleanup (When Needed)
+
+To remove everything:
+
+```cmd
+# Delete Lambda functions
+aws lambda delete-function --function-name cloudops-api-gateway --region ap-southeast-2
+aws lambda delete-function --function-name cloudops-data-collector --region ap-southeast-2
+aws lambda delete-function --function-name cloudops-alert-service --region ap-southeast-2
+
+# Delete API Gateway
+aws apigatewayv2 delete-api --api-id YOUR_API_ID --region ap-southeast-2
+
+# Delete EventBridge rules
+aws events remove-targets --rule cloudops-collect-metrics --ids "1" --region ap-southeast-2
+aws events delete-rule --name cloudops-collect-metrics --region ap-southeast-2
+
+aws events remove-targets --rule cloudops-collect-costs --ids "1" --region ap-southeast-2
+aws events delete-rule --name cloudops-collect-costs --region ap-southeast-2
+
+# Delete IAM role (detach policies first)
+aws iam detach-role-policy --role-name cloudops-lambda-role --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+aws iam detach-role-policy --role-name cloudops-lambda-role --policy-arn arn:aws:iam::YOUR_ACCOUNT_ID:policy/cloudops-lambda-policy
+aws iam delete-policy --policy-arn arn:aws:iam::YOUR_ACCOUNT_ID:policy/cloudops-lambda-policy
+aws iam delete-role --role-name cloudops-lambda-role
+
+# Keep DynamoDB tables (data persistence)
+# Keep CloudWatch Logs (they auto-delete after 7 days)
+```
+
+---
+
+## Next Steps After Deployment
+
+1. ✅ **Test the API** - Make sure all endpoints work
+2. ✅ **Check CloudWatch Logs** - Verify no errors
+3. ✅ **Wait 5 minutes** - Let data collector run once
+4. ✅ **Query DynamoDB** - Confirm data is being collected
+5. ✅ **Update frontend** - Point it to your API URL
+6. ✅ **Test locally** - Run `pnpm dev` and test all pages
+7. 📝 **Update Resume** - Add live demo URL
+8. 📊 **Monitor costs** - Check AWS billing dashboard weekly
+
+---
+
+## Support
+
+If you run into issues:
+
+1. **Check CloudWatch Logs**:
+   - AWS Console → CloudWatch → Log groups
+   - Look for `/aws/lambda/cloudops-*`
+
+2. **Check AWS Free Tier Usage**:
+   - AWS Console → Billing → Free Tier
+   - Verify you're within limits
+
+3. **Verify Configuration**:
+   - Run the verification checks above
+   - Compare with expected outputs
+
+4. **Manual Deployment**:
+   - Use the manual steps if automation fails
+   - Slower but more control
+
+---
+
+## Ready to Deploy!
+
+Run this command:
+```cmd
+.\deployment\deploy.bat
+```
+
+Then sit back and watch it deploy! ☕
+
+Estimated time: 3-5 minutes

@@ -1,0 +1,83 @@
+# Development overrides with hot reload
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  # ==========================================================================
+  # TypeScript Services - Hot Reload
+  # ==========================================================================
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./services/api-gateway/src:/app/src:ro
+      - ./packages:/packages:ro
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    command: ["pnpm", "dev"]
+
+  data-collector:
+    build:
+      context: ./services/data-collector
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./services/data-collector/src:/app/src:ro
+      - ./packages:/packages:ro
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    command: ["pnpm", "dev"]
+
+  alert-service:
+    build:
+      context: ./services/alert-service
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./services/alert-service/src:/app/src:ro
+      - ./packages:/packages:ro
+    environment:
+      - NODE_ENV=development
+      - LOG_LEVEL=debug
+    command: ["pnpm", "dev"]
+
+  # ==========================================================================
+  # .NET Services - Hot Reload
+  # ==========================================================================
+
+  cost-analyzer:
+    build:
+      context: ./services/cost-analyzer
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./services/cost-analyzer:/src:ro
+    environment:
+      - DOTNET_WATCH_RESTART_ON_RUDE_EDIT=1
+    command: ["dotnet", "watch", "run", "--project", "/src/CostAnalyzer.csproj"]
+
+  anomaly-detector:
+    build:
+      context: ./services/anomaly-detector
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./services/anomaly-detector:/src:ro
+    environment:
+      - DOTNET_WATCH_RESTART_ON_RUDE_EDIT=1
+    command: ["dotnet", "watch", "run", "--project", "/src/AnomalyDetector.csproj"]
+
+  # ==========================================================================
+  # Frontend - Hot Reload
+  # ==========================================================================
+
+  frontend:
+    build:
+      context: ./frontend/dashboard
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend/dashboard/src:/app/src:ro
+      - ./frontend/dashboard/public:/app/public:ro
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=http://localhost:3001
+    command: ["pnpm", "dev"]
