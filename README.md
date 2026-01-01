@@ -800,8 +800,6 @@ The following features are planned or in development:
 **Dante Tura Salvador**
 
 - GitHub: [@DanteTuraSalvador](https://github.com/DanteTuraSalvador)
-- LinkedIn: [Your LinkedIn](https://www.linkedin.com/in/your-profile) _(update with your profile)_
-- Portfolio: [Your Portfolio](https://your-portfolio.com) _(update with your portfolio)_
 
 ---
 
@@ -832,7 +830,7 @@ The following features are planned or in development:
 
 **⭐ Star this repo if you find it helpful!**
 
-**📧 Questions? Open an issue or reach out on LinkedIn**
+**📧 Questions? Open an issue**
 
 Built with ❤️ using AWS, TypeScript, and modern cloud architecture patterns
 
